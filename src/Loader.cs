@@ -168,7 +168,30 @@ class FontLoader
     [HarmonyPostfix, HarmonyPatch(typeof(TMP_Text), "font", MethodType.Setter)]
     static void PatchTextFontSetter(TMP_FontAsset value)
     {
+        if (value == null) return;
+
         PatchFontAwake(value);
+    }
+
+    // Dynamic multi-atlas font assets create new atlas pages at runtime with Unity's default
+    // filter mode (Bilinear), which would make bundle fonts inconsistent after the first page
+    // fills up. Keep new pages using the same sampling settings as the first page.
+    [HarmonyPostfix, HarmonyPatch(typeof(TMP_FontAsset), "SetupNewAtlasTexture")]
+    static void PatchSetupNewAtlasTexture(TMP_FontAsset __instance)
+    {
+        if (__instance.atlasTextures == null || __instance.atlasTextures.Length == 0 || !__instance.atlasTextures[0])
+        {
+            return;
+        }
+
+        FilterMode filterMode = __instance.atlasTextures[0].filterMode;
+        TextureWrapMode wrapMode = __instance.atlasTextures[0].wrapMode;
+        foreach (Texture2D texture in __instance.atlasTextures)
+        {
+            if (!texture) continue;
+            texture.filterMode = filterMode;
+            texture.wrapMode = wrapMode;
+        }
     }
 
     [HarmonyPrefix, HarmonyPatch(typeof(TextMeshProUGUI), "Awake")]
