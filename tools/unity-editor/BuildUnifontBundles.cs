@@ -68,6 +68,8 @@ public static class BuildUnifontBundles
                 CreateVariantAssets(v);
             }
             AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            VerifySavedAssets();
 
             foreach (Variant v in Variants)
             {
@@ -186,14 +188,46 @@ public static class BuildUnifontBundles
             texture.filterMode = v.FilterMode;
             texture.wrapMode = TextureWrapMode.Clamp;
 
-            AssetDatabase.CreateAsset(fontAsset.material, $"{outDir}/{kind} Material.asset");
+            // Persist the font asset first, then the texture as its sub-asset, and only then
+            // the material: CreateAsset serializes the object at that instant, so saving the
+            // material while the texture is still non-persistent would serialize _MainTex as
+            // null (which NRE'd TMP_MaterialManager.GetFallbackMaterial in-game).
             AssetDatabase.CreateAsset(fontAsset, $"{outDir}/{kind}.asset");
             AssetDatabase.AddObjectToAsset(texture, fontAsset);
+            AssetDatabase.CreateAsset(fontAsset.material, $"{outDir}/{kind} Material.asset");
             EditorUtility.SetDirty(fontAsset);
+            EditorUtility.SetDirty(fontAsset.material);
 
             Debug.Log($"[BuildUnifontBundles] {v.BundleName}/{kind}: pointSize={fi.pointSize} " +
                       $"ascent={fi.ascentLine} descent={fi.descentLine} lineHeight={fi.lineHeight} " +
                       $"filter={v.FilterMode} mode={fontAsset.atlasPopulationMode}");
+        }
+    }
+
+    static void VerifySavedAssets()
+    {
+        // Reload every persisted font asset/material from disk and assert the
+        // references that in-game fallback rendering depends on.
+        foreach (Variant v in Variants)
+        {
+            foreach (string kind in new[] { "Normal", "Transmit" })
+            {
+                string dir = $"Assets/Generated/{v.DirName}";
+                var fa = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>($"{dir}/{kind}.asset");
+                var mat = AssetDatabase.LoadAssetAtPath<Material>($"{dir}/{kind} Material.asset");
+                if (fa == null || mat == null)
+                    throw new System.Exception($"Reload failed for {v.BundleName}/{kind}");
+                if (mat.GetTexture(ShaderUtilities.ID_MainTex) == null)
+                    throw new System.Exception(
+                        $"{v.BundleName}/{kind}: material._MainTex is null after save " +
+                        "(would NRE TMP_MaterialManager.GetFallbackMaterial in-game)");
+                if (mat.GetTexture(ShaderUtilities.ID_MainTex) != fa.atlasTextures[0])
+                    throw new System.Exception($"{v.BundleName}/{kind}: material._MainTex != atlasTextures[0]");
+                if (fa.sourceFontFile == null)
+                    throw new System.Exception($"{v.BundleName}/{kind}: sourceFontFile is null after save");
+                Debug.Log($"[BuildUnifontBundles] verified {v.BundleName}/{kind}: " +
+                          $"material._MainTex=OK atlasTextures={fa.atlasTextures.Length} sourceFont=OK");
+            }
         }
     }
 

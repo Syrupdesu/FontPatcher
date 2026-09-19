@@ -20,21 +20,30 @@ cp "$REPO_ROOT/tools/unity-editor/"*.cs "$PROJ/Assets/Editor/"
 
 # TMP shaders ship only inside "TMP Essential Resources.unitypackage" (a tar.gz), and
 # AssetDatabase.ImportPackage is unreliable in batchmode. Extract it into Assets directly;
-# Unity imports everything on startup. Skipped once present.
+# Unity imports everything on startup. The .meta files MUST be copied too — they carry the
+# original GUIDs that TMP Settings and the TMP shaders reference each other by; without
+# them Unity mints new GUIDs and every cross-reference in TMP Settings breaks. Skipped
+# once present.
 PKGDIR=$(ls -d "$PROJ/Library/PackageCache"/com.unity.textmeshpro@* 2>/dev/null | head -1)
-if [ -n "${PKGDIR:-}" ] && [ -d "$PROJ/Assets" ] && [ ! -d "$PROJ/Assets/TextMesh Resources" ]; then
+if [ -n "${PKGDIR:-}" ] && [ -d "$PROJ/Assets" ] && [ ! -f "$PROJ/Assets/TextMesh Pro/.lcfp-extracted" ]; then
   echo "== extracting TMP Essential Resources into Assets =="
+  rm -rf "$PROJ/Assets/TextMesh Pro" "$PROJ/Assets/TextMesh Pro.meta"
   TMPD=$(mktemp -d)
   tar xzf "$PKGDIR/Package Resources/TMP Essential Resources.unitypackage" -C "$TMPD"
   find "$TMPD" -name pathname | while read -r p; do
+    entry_dir="$(dirname "$p")"
     dest_rel="$(cat "$p")"
-    asset_file="$(dirname "$p")/asset"
-    if [ -f "$asset_file" ]; then
-      mkdir -p "$PROJ/$(dirname "$dest_rel")"
-      cp "$asset_file" "$PROJ/$dest_rel"
+    mkdir -p "$PROJ/$(dirname "$dest_rel")"
+    [ -f "$entry_dir/asset" ] && cp "$entry_dir/asset" "$PROJ/$dest_rel"
+    if [ -f "$entry_dir/asset.meta" ]; then
+      cp "$entry_dir/asset.meta" "$PROJ/$dest_rel.meta"
+    elif [ ! -f "$entry_dir/asset" ]; then
+      # Folder entry: no asset file, meta was stored next to pathname.
+      cp "$entry_dir/$(basename "$dest_rel").meta" "$PROJ/$dest_rel.meta" 2>/dev/null
     fi
   done
   rm -rf "$TMPD"
+  touch "$PROJ/Assets/TextMesh Pro/.lcfp-extracted"
 fi
 
 echo "== stage 1: build bundles (StandaloneWindows64 + StandaloneOSX) =="
@@ -46,10 +55,12 @@ LCFP_REPO_ROOT="$REPO_ROOT" LCFP_OSX_OUT="$OUT_OSX" \
 echo "build exit: $?"
 
 echo "== stage 2: validate macOS bundles in-editor =="
+# Run with a graphics device: the validation drives TextMeshProUGUI layout,
+# which is safer with a real GfxDevice.
 REPORT="$WORKSPACE/logs/validation-report.txt"
 LCFP_OSX_OUT="$OUT_OSX" LCFP_VALIDATION_REPORT="$REPORT" \
   LCFP_HANZI_FILE="$([ "$FULL_HANZI" = 1 ] && echo "$WORKSPACE/data/tongyong-guifan-hanzibiao.txt" || echo "")" \
-  "$UNITY_BIN" -batchmode -nographics -quit \
+  "$UNITY_BIN" -batchmode -quit \
   -projectPath "$PROJ" \
   -executeMethod ValidateUnifontBundles.Run \
   -logFile "$LOGS/unity-validate.log"

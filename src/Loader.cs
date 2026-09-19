@@ -72,12 +72,16 @@ class FontLoader
                     {
                         tmp.BundleName = info.Name;
                         tmp.Normal.name = $"{info.Name}(Normal)";
+                        EnsureMainTexture(tmp.Normal);
+                        DiagnoseFontAsset(tmp.Normal, $"{info.Name}(Normal)");
                         Plugin.LogInfo($"[{info.Name}] Normal font found ({tmp.Normal.name})");
                     }
                     if (tmp.Transmit)
                     {
                         tmp.BundleName = info.Name;
                         tmp.Transmit.name = $"{info.Name}(Transmit)";
+                        EnsureMainTexture(tmp.Transmit);
+                        DiagnoseFontAsset(tmp.Transmit, $"{info.Name}(Transmit)");
                         Plugin.LogInfo($"[{info.Name}] Transmit font found ({tmp.Transmit.name})");
                     }
 
@@ -107,6 +111,38 @@ class FontLoader
         }
     }
 
+    // Re-bind the material's main texture if it was serialized as null (older bundles
+    // built before the asset-creation order was fixed). A null _MainTex makes
+    // TMP_MaterialManager.GetFallbackMaterial throw a NullReferenceException.
+    static void EnsureMainTexture(TMP_FontAsset font)
+    {
+        if (!font.material) return;
+        if (font.material.GetTexture(ShaderUtilities.ID_MainTex)) return;
+        if (font.atlasTextures == null || font.atlasTextures.Length == 0 || !font.atlasTextures[0]) return;
+
+        font.material.mainTexture = font.atlasTextures[0];
+        Plugin.LogInfo($"[{font.name}] material._MainTex was null; re-bound to atlasTextures[0]");
+    }
+
+    static void DiagnoseFontAsset(TMP_FontAsset font, string label)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"[{label}] material={(font.material ? "ok" : "NULL")}");
+        if (font.material)
+        {
+            sb.Append($", shader={(font.material.shader ? font.material.shader.name : "NULL")}");
+            sb.Append($", _MainTex={(font.material.GetTexture(ShaderUtilities.ID_MainTex) ? "ok" : "NULL")}");
+        }
+        sb.Append($", atlasTextures={(font.atlasTextures != null ? font.atlasTextures.Length : 0)}");
+        if (font.atlasTextures != null && font.atlasTextures.Length > 0 && font.atlasTextures[0])
+            sb.Append($", atlasPage0={font.atlasTextures[0].width}x{font.atlasTextures[0].height}/{font.atlasTextures[0].filterMode}");
+        else
+            sb.Append(", atlasPage0=NULL");
+        sb.Append($", populationMode={font.atlasPopulationMode}");
+        sb.Append($", sourceFontFile={(font.sourceFontFile ? "ok" : "NULL")}");
+        Plugin.LogInfo(sb.ToString());
+    }
+
     [HarmonyPrefix, HarmonyPatch(typeof(TMP_FontAsset), "Awake")]
     static void PatchFontAwake(TMP_FontAsset __instance)
     {
@@ -133,7 +169,7 @@ class FontLoader
 
             if (patchCount > 0)
             {
-                Plugin.LogInfo($"[{fontName}] font patched (Normal)");
+                Plugin.LogInfo($"[{fontName}] font patched (Normal): +{patchCount} fallback(s), total={__instance.fallbackFontAssetTable.Count}");
             }
             return;
         }
@@ -157,7 +193,7 @@ class FontLoader
 
             if (patchCount > 0)
             {
-                Plugin.LogInfo($"[{fontName}] font patched (Transmit)");
+                Plugin.LogInfo($"[{fontName}] font patched (Transmit): +{patchCount} fallback(s), total={__instance.fallbackFontAssetTable.Count}");
             }
             return;
         }

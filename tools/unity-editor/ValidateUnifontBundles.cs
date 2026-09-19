@@ -17,6 +17,7 @@ using TMPro;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.TextCore;
+using UnityEngine.TextCore.LowLevel;
 
 public static class ValidateUnifontBundles
 {
@@ -35,6 +36,31 @@ public static class ValidateUnifontBundles
 
             var report = new StringBuilder();
             bool allOk = true;
+
+            // Control: run one layout BEFORE touching any bundle. TMP_Settings in this
+            // project is incomplete (tar-extracted essentials), so isolate bundle-related
+            // breakage from pre-existing state.
+            try
+            {
+                var settings = TMP_Settings.instance;
+                string leading;
+                try { leading = TMP_Settings.leadingCharacters != null ? "ok" : "null"; }
+                catch (System.Exception e) { leading = $"THROWS {e.GetType().Name}"; }
+                Debug.Log($"[ValidateUnifontBundles] pre-bundle TMP_Settings={settings.name} leading={leading}");
+
+                var go = new GameObject("pre-bundle-control");
+                var probeText = go.AddComponent<TextMeshPro>();
+                probeText.text = "布局控制 test123";
+                string detail = TryForceLayout(probeText);
+                UnityEngine.Object.DestroyImmediate(go);
+                report.AppendLine($"CONTROL pre-bundle layout: {detail}");
+                Debug.Log($"[ValidateUnifontBundles] {report}");
+            }
+            catch (System.Exception e)
+            {
+                report.AppendLine($"CONTROL pre-bundle layout EXCEPTION: {e.GetType().Name}: {e.Message}");
+                Debug.LogException(e);
+            }
 
             foreach (string bundleFile in Directory.GetFiles(osxOut))
             {
@@ -102,6 +128,9 @@ public static class ValidateUnifontBundles
                     fa.sourceFontFile ? fa.sourceFontFile.name : "null");
         ok &= Check(report, $"{kind} material != null", fa.material != null,
                     fa.material ? fa.material.shader.name : "null");
+        ok &= Check(report, $"{kind} material._MainTex == atlasTextures[0]",
+                    fa.material != null && fa.material.GetTexture(ShaderUtilities.ID_MainTex) == fa.atlasTextures[0],
+                    fa.material != null ? (fa.material.GetTexture(ShaderUtilities.ID_MainTex) == null ? "null!" : "ok") : "no material");
 
         Texture2D tex = fa.atlasTextures != null && fa.atlasTextures.Length > 0 ? fa.atlasTextures[0] : null;
         ok &= Check(report, $"{kind} atlas page 0 exists", tex != null, "null");
@@ -173,6 +202,46 @@ public static class ValidateUnifontBundles
         int pages = runtime.atlasTextures.Count(t => t != null);
         long texBytes = pages * 1024L * 1024L; // Alpha8 = 1 byte/texel
         report.AppendLine($"{kind} atlas pages in use: {pages} (Alpha8, ~{texBytes / 1024 / 1024} MB texture memory)");
+
+        // --- Full text layout through the game's fallback path ---
+        // A primary font with an emptied lookup table + our asset as its fallback drives
+        // TextMeshProUGUI.SetArraySizes -> TMP_MaterialManager.GetFallbackMaterial(source,
+        // target) with our material as target — the exact code path that NRE'd in-game
+        // when _MainTex was serialized as null.
+        var go = new GameObject("tmp-validate");
+        // The mesh-based TextMeshPro component (not UGUI) works headless; it shares
+        // TMP_Text.SetArraySizes / GetFallbackMaterial with the UGUI variant the game uses.
+        try
+        {
+            var text = go.AddComponent<TextMeshPro>();
+            string sampleText = "中文测试ＡＢＣ123 fallback-path";
+
+            // Case A: our font as the text's own font (no fallback involved).
+            text.font = runtime;
+            text.text = sampleText;
+            string detailA = TryForceLayout(text);
+            ok &= Check(report, $"{kind} layout with our font as primary (ForceMeshUpdate)",
+                        ParseChars(detailA) > 0, detailA);
+
+            // Case B: empty primary font + our asset as fallback (the game's path).
+            var primary = TMP_FontAsset.CreateFontAsset(runtime.sourceFontFile, 80, 8,
+                GlyphRenderMode.RASTER, 512, 512, AtlasPopulationMode.Static);
+            primary.name = "primary-empty";
+            primary.characterLookupTable.Clear();
+            primary.fallbackFontAssetTable = new List<TMP_FontAsset> { runtime };
+
+            text.font = primary;
+            text.text = sampleText;
+            string detailB = TryForceLayout(text);
+            ok &= Check(report, $"{kind} full layout via fallback (ForceMeshUpdate)",
+                        ParseChars(detailB) > 0, detailB);
+
+            UnityEngine.Object.DestroyImmediate(primary);
+        }
+        finally
+        {
+            UnityEngine.Object.DestroyImmediate(go);
+        }
         return ok;
     }
 
@@ -180,6 +249,32 @@ public static class ValidateUnifontBundles
     {
         report.AppendLine($"{(condition ? "PASS" : "FAIL")}: {label} ({detail})");
         return condition;
+    }
+
+    static string TryForceLayout(TextMeshPro text)
+    {
+        try
+        {
+            text.ForceMeshUpdate(true, true);
+            TMP_TextInfo info = text.textInfo;
+            int fallbackChars = 0;
+            for (int i = 0; i < info.characterCount; i++)
+            {
+                if (info.characterInfo[i].fontAsset != null && info.characterInfo[i].fontAsset != text.font)
+                    fallbackChars++;
+            }
+            return $"chars={info.characterCount} meshVerts={text.mesh.vertexCount} viaFallback={fallbackChars}";
+        }
+        catch (System.Exception e)
+        {
+            return $"EXCEPTION {e.GetType().Name}: {e.Message}";
+        }
+    }
+
+    static int ParseChars(string detail)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(detail ?? "", "chars=(\\d+)");
+        return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
     static uint[] ReadHanziFile(string path)
