@@ -54,6 +54,12 @@ LCFP_REPO_ROOT="$REPO_ROOT" LCFP_OSX_OUT="$OUT_OSX" \
   -logFile "$LOGS/unity-build.log"
 echo "build exit: $?"
 
+echo "== stage 1b: audit shipped bundles (serialized content) =="
+"$WORKSPACE/.venv/bin/python" "$REPO_ROOT/tools/audit_bundle.py" \
+  "$REPO_ROOT/assets/FontPatcher/default/00 zh" \
+  "$REPO_ROOT/test-bundles/zh-bilinear/01 zh bilinear" \
+  "$REPO_ROOT/test-bundles/zh-native/02 zh native"
+
 echo "== stage 2: validate macOS bundles in-editor =="
 # Run with a graphics device: the validation drives TextMeshProUGUI layout,
 # which is safer with a real GfxDevice.

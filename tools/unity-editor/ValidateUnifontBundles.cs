@@ -236,6 +236,14 @@ public static class ValidateUnifontBundles
             ok &= Check(report, $"{kind} full layout via fallback (ForceMeshUpdate)",
                         ParseChars(detailB) > 0, detailB);
 
+            // Informational: the mesh renderer's primary material (glyphs render via
+            // submesh materials derived per font asset).
+            MeshRenderer renderer = go.GetComponent<MeshRenderer>();
+            if (renderer != null && renderer.sharedMaterial != null)
+            {
+                report.AppendLine($"{kind} info: primary mesh material shader = {renderer.sharedMaterial.shader.name}");
+            }
+
             UnityEngine.Object.DestroyImmediate(primary);
         }
         finally
@@ -275,6 +283,56 @@ public static class ValidateUnifontBundles
     {
         var m = System.Text.RegularExpressions.Regex.Match(detail ?? "", "chars=(\\d+)");
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
+    }
+
+    // Renders the text mesh orthographically on black and measures the fraction of the
+    // glyph quads' bounding area covered by non-transparent pixels. Only strokes should
+    // paint (bitmap coverage atlas); a solid quad means the atlas background leaks.
+    static double RenderBoxCoverage(GameObject go)
+    {
+        MeshFilter mf = go.GetComponent<MeshFilter>();
+        Mesh mesh = mf != null ? mf.sharedMesh : null;
+        MeshRenderer renderer = go.GetComponent<MeshRenderer>();
+        if (mesh == null || renderer == null || mesh.vertexCount == 0) return 0;
+
+        var b = new Bounds();
+        foreach (Vector3 p in mesh.vertices) b.Encapsulate(p);
+        if (b.extents.sqrMagnitude < 1e-8f) return 0;
+
+        int size = 256;
+        var rt = new RenderTexture(size, size, 24, RenderTextureFormat.ARGB32);
+        var camGo = new GameObject("box-probe-cam");
+        var cam = camGo.AddComponent<Camera>();
+        cam.backgroundColor = Color.clear;
+        cam.clearFlags = CameraClearFlags.SolidColor;
+        cam.orthographic = true;
+        cam.targetTexture = rt;
+        cam.aspect = 1f;
+        float half = Mathf.Max(b.extents.x, b.extents.y) * 1.05f + 0.01f;
+        cam.transform.position = b.center + Vector3.back * 10f;
+        cam.orthographicSize = half;
+        cam.Render();
+
+        RenderTexture.active = rt;
+        var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        tex.ReadPixels(new Rect(0, 0, size, size), 0, 0);
+        tex.Apply();
+        RenderTexture.active = null;
+        cam.targetTexture = null;
+
+        Color32[] px = tex.GetPixels32();
+        int lit = 0;
+        foreach (Color32 p in px)
+            if (p.a > 8) lit++;
+
+        UnityEngine.Object.DestroyImmediate(tex);
+        UnityEngine.Object.DestroyImmediate(camGo);
+        rt.Release();
+        UnityEngine.Object.DestroyImmediate(rt);
+
+        double quadFraction = (double)(b.extents.x * 2f) / (half * 2f) * (double)(b.extents.y * 2f) / (half * 2f);
+        double litFraction = (double)lit / (size * size);
+        return quadFraction > 0 ? litFraction / quadFraction : 0;
     }
 
     static uint[] ReadHanziFile(string path)

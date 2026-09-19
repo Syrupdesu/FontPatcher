@@ -130,8 +130,16 @@ class FontLoader
         sb.Append($"[{label}] material={(font.material ? "ok" : "NULL")}");
         if (font.material)
         {
-            sb.Append($", shader={(font.material.shader ? font.material.shader.name : "NULL")}");
-            sb.Append($", _MainTex={(font.material.GetTexture(ShaderUtilities.ID_MainTex) ? "ok" : "NULL")}");
+            Material m = font.material;
+            sb.Append($", shader={(m.shader ? m.shader.name : "NULL")}");
+            sb.Append($", _MainTex={(m.GetTexture(ShaderUtilities.ID_MainTex) ? "ok" : "NULL")}");
+            sb.Append($", _GradientScale={DescribeFloat(m, ShaderUtilities.ID_GradientScale)}");
+            sb.Append($", _TextureWidth={DescribeFloat(m, ShaderUtilities.ID_TextureWidth)}");
+            sb.Append($", _TextureHeight={DescribeFloat(m, ShaderUtilities.ID_TextureHeight)}");
+            sb.Append($", _WeightNormal={DescribeFloat(m, ShaderUtilities.ID_WeightNormal)}");
+            sb.Append($", _WeightBold={DescribeFloat(m, ShaderUtilities.ID_WeightBold)}");
+            sb.Append($", _FaceDilate={DescribeFloat(m, ShaderUtilities.ID_FaceDilate)}");
+            sb.Append($", _UnderlayDilate={DescribeFloat(m, ShaderUtilities.ID_UnderlayDilate)}");
         }
         sb.Append($", atlasTextures={(font.atlasTextures != null ? font.atlasTextures.Length : 0)}");
         if (font.atlasTextures != null && font.atlasTextures.Length > 0 && font.atlasTextures[0])
@@ -141,6 +149,31 @@ class FontLoader
         sb.Append($", populationMode={font.atlasPopulationMode}");
         sb.Append($", sourceFontFile={(font.sourceFontFile ? "ok" : "NULL")}");
         Plugin.LogInfo(sb.ToString());
+    }
+
+    // Returns the float value or "absent" — GetFloat silently returns 0 for missing
+    // shader properties, which has already bitten us once (see _GradientScale).
+    static string DescribeFloat(Material m, int propertyId)
+    {
+        return m.HasProperty(propertyId) ? m.GetFloat(propertyId).ToString("0.##") : "absent";
+    }
+
+    // Log what TMP actually derives for in-game fallback rendering.
+    [HarmonyPostfix, HarmonyPatch(typeof(TMP_MaterialManager), "GetFallbackMaterial",
+        new[] { typeof(Material), typeof(Material) })]
+    static void LogDerivedFallbackMaterial(Material sourceMaterial, Material targetMaterial, Material __result)
+    {
+        if (__result == null) return;
+
+        Plugin.LogInfo(
+            $"[fallback material] source={(sourceMaterial && sourceMaterial.shader ? sourceMaterial.shader.name : "NULL")} " +
+            $"target={(targetMaterial && targetMaterial.shader ? targetMaterial.shader.name : "NULL")} " +
+            $"-> shader={(__result.shader ? __result.shader.name : "NULL")} " +
+            $"_GradientScale={DescribeFloat(__result, ShaderUtilities.ID_GradientScale)} " +
+            $"_FaceDilate={DescribeFloat(__result, ShaderUtilities.ID_FaceDilate)} " +
+            $"_OutlineWidth={DescribeFloat(__result, ShaderUtilities.ID_OutlineWidth)} " +
+            $"_UnderlayDilate={DescribeFloat(__result, ShaderUtilities.ID_UnderlayDilate)} " +
+            $"_MainTex={(__result.GetTexture(ShaderUtilities.ID_MainTex) ? "ok" : "NULL")}");
     }
 
     [HarmonyPrefix, HarmonyPatch(typeof(TMP_FontAsset), "Awake")]

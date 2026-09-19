@@ -168,25 +168,47 @@ public static class BuildUnifontBundles
             fontAsset.name = kind;
             fontAsset.isMultiAtlasTexturesEnabled = true;
 
+            // Materialize the first atlas page so the bundle ships a real texture.
+            // Texture2D.Resize leaves the content UNDEFINED — it must be cleared to
+            // transparent explicitly, or every glyph quad paints a solid box of text
+            // color (the atlas background is part of each glyph quad's UV rect).
+            // TMP only calls ResetAtlasTexture itself when the page is still 0x0.
+            Texture2D texture = fontAsset.atlasTextures[0];
+            if (texture.width != AtlasSize || texture.height != AtlasSize)
+            {
+                texture.Reinitialize(AtlasSize, AtlasSize, TextureFormat.Alpha8, false);
+            }
+            texture.SetPixelData(new byte[AtlasSize * AtlasSize], 0);
+            texture.Apply(false, false);
+            texture.name = kind + " Atlas";
+            texture.filterMode = v.FilterMode;
+            texture.wrapMode = TextureWrapMode.Clamp;
+
+            // The upstream kr/jp bundles use a TMP Distance Field material with
+            // _GradientScale = padding + 1 (UnityPy-measured reference: 9+1=10,
+            // _WeightBold 0.75, RASTER bitmap atlas, Alpha8). TMP's fallback material
+            // derivation (TMP_MaterialManager.GetFallbackMaterial) copies exactly these
+            // values onto a clone of the game font's material; a Mobile/Bitmap material
+            // without them fails the HasProperty check and makes TMP clone *our*
+            // material instead, which renders text through the wrong pipeline.
+            Shader sdfShader = Shader.Find("TextMeshPro/Distance Field");
+            if (sdfShader == null)
+                throw new System.Exception("Shader 'TextMeshPro/Distance Field' not found");
+            Material sdfMaterial = new Material(sdfShader);
+            sdfMaterial.SetTexture(ShaderUtilities.ID_MainTex, texture);
+            sdfMaterial.SetFloat(ShaderUtilities.ID_GradientScale, v.Padding + 1);
+            sdfMaterial.SetFloat(ShaderUtilities.ID_TextureWidth, AtlasSize);
+            sdfMaterial.SetFloat(ShaderUtilities.ID_TextureHeight, AtlasSize);
+            sdfMaterial.SetFloat(ShaderUtilities.ID_WeightNormal, fontAsset.normalStyle);
+            sdfMaterial.SetFloat(ShaderUtilities.ID_WeightBold, fontAsset.boldStyle);
+            fontAsset.material = sdfMaterial;
+
             // faceInfo is a struct: copy, adjust, write back.
             FaceInfo fi = fontAsset.faceInfo;
             fi.ascentLine = AscentEm * fi.pointSize;
             fi.descentLine = -DescentEm * fi.pointSize;
             fi.lineHeight = LineHeightEm * fi.pointSize;
             fontAsset.faceInfo = fi;
-
-            // Materialize the first atlas page so the bundle ships a real texture.
-            // A freshly resized texture is zero-filled (transparent), which is what
-            // TMP's own ResetAtlasTexture would produce.
-            Texture2D texture = fontAsset.atlasTextures[0];
-            if (texture.width != AtlasSize || texture.height != AtlasSize)
-            {
-                texture.Resize(AtlasSize, AtlasSize, TextureFormat.Alpha8, false);
-                texture.Apply(false, false);
-            }
-            texture.name = kind + " Atlas";
-            texture.filterMode = v.FilterMode;
-            texture.wrapMode = TextureWrapMode.Clamp;
 
             // Persist the font asset first, then the texture as its sub-asset, and only then
             // the material: CreateAsset serializes the object at that instant, so saving the
@@ -200,7 +222,8 @@ public static class BuildUnifontBundles
 
             Debug.Log($"[BuildUnifontBundles] {v.BundleName}/{kind}: pointSize={fi.pointSize} " +
                       $"ascent={fi.ascentLine} descent={fi.descentLine} lineHeight={fi.lineHeight} " +
-                      $"filter={v.FilterMode} mode={fontAsset.atlasPopulationMode}");
+                      $"filter={v.FilterMode} mode={fontAsset.atlasPopulationMode} " +
+                      $"material={sdfShader.name} gradientScale={v.Padding + 1}");
         }
     }
 
@@ -225,8 +248,31 @@ public static class BuildUnifontBundles
                     throw new System.Exception($"{v.BundleName}/{kind}: material._MainTex != atlasTextures[0]");
                 if (fa.sourceFontFile == null)
                     throw new System.Exception($"{v.BundleName}/{kind}: sourceFontFile is null after save");
+                if (mat.shader.name != "TextMeshPro/Distance Field")
+                    throw new System.Exception($"{v.BundleName}/{kind}: unexpected shader {mat.shader.name}");
+                if (mat.GetFloat(ShaderUtilities.ID_GradientScale) != v.Padding + 1)
+                    throw new System.Exception(
+                        $"{v.BundleName}/{kind}: _GradientScale {mat.GetFloat(ShaderUtilities.ID_GradientScale)} != padding+1");
+                if (!mat.HasProperty(ShaderUtilities.ID_GradientScale))
+                    throw new System.Exception($"{v.BundleName}/{kind}: material lacks _GradientScale");
+
+                // The shipped atlas page must be fully transparent: Texture2D.Resize
+                // leaves undefined content, and a non-zero background paints a solid
+                // box behind every glyph quad.
+                var readable = new Texture2D(AtlasSize, AtlasSize, TextureFormat.Alpha8, false);
+                Graphics.CopyTexture(fa.atlasTextures[0], readable);
+                byte[] raw = readable.GetRawTextureData();
+                int nonzero = 0;
+                foreach (byte b in raw)
+                    if (b != 0) nonzero++;
+                UnityEngine.Object.DestroyImmediate(readable);
+                if (nonzero != 0)
+                    throw new System.Exception(
+                        $"{v.BundleName}/{kind}: shipped atlas has {nonzero} non-zero background texels");
+
                 Debug.Log($"[BuildUnifontBundles] verified {v.BundleName}/{kind}: " +
-                          $"material._MainTex=OK atlasTextures={fa.atlasTextures.Length} sourceFont=OK");
+                          $"material._MainTex=OK shader={mat.shader.name} gradientScale={v.Padding + 1} " +
+                          $"atlasTextures={fa.atlasTextures.Length} sourceFont=OK atlasContent=clear");
             }
         }
     }
