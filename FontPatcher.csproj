@@ -55,7 +55,15 @@
     <Exec Command="tcli build --package-version $(BepInExPluginVersion)" />
   </Target>
 
+  <!-- tcli is unavailable or broken on this machine: package with the python script. -->
+  <Target Name="BundlingFallback" AfterTargets="Build" DependsOnTargets="ProbeTcli" Condition="'$(Configuration)' == 'Release' and '$(EnableTcliBuild)' == 'true' and '$(TcliAvailable)' != 'true'">
+    <Delete Files="$(OutputPath)/$(AssemblyName).deps.json" />
+    <Exec Command="python3 $(MSBuildProjectDirectory)/tools/package-thunderstore.py --repo $(MSBuildProjectDirectory)" />
+  </Target>
+
   <ItemGroup>
+    <!-- Unity editor tooling lives in the repo but is not part of the plugin. -->
+    <Compile Remove="tools/**/*.cs" />
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
     <PackageReference Include="BepInEx.Core" Version="5.*" />
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" PrivateAssets="all" />

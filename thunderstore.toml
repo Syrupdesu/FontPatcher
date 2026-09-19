@@ -21,6 +21,9 @@ target = "plugins/"
 source = "./LICENSE"
 target = "/"
 [[build.copy]]
+source = "./licenses"
+target = "licenses"
+[[build.copy]]
 source = "./assets"
 target = "config/"
 

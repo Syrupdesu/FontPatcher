@@ -33,21 +33,22 @@ public static class BuildUnifontBundles
     class Variant
     {
         public string BundleName;     // file name in the config folder = fallback order
-        public string DirName;        // sub folder under assets/FontPatcher/
+        public string DirName;        // sub folder under assets/FontPatcher/ (or test-bundles/)
         public string FontAssetDir;   // Assets/Fonts/<dir> holding this variant's font copy
         public int SamplingPointSize; // 80 = 16px bitmap grid x5; 16 = native 1:1
         public int Padding;
         public FilterMode FilterMode;
+        public bool ShipToConfig;     // true: repo assets/ (shipped in the Thunderstore package)
     }
 
     static readonly Variant[] Variants =
     {
         new Variant { BundleName = "00 zh", DirName = "default", FontAssetDir = "default",
-                      SamplingPointSize = 80, Padding = 8, FilterMode = FilterMode.Point },
+                      SamplingPointSize = 80, Padding = 8, FilterMode = FilterMode.Point, ShipToConfig = true },
         new Variant { BundleName = "01 zh bilinear", DirName = "zh-bilinear", FontAssetDir = "zh-bilinear",
-                      SamplingPointSize = 80, Padding = 8, FilterMode = FilterMode.Bilinear },
+                      SamplingPointSize = 80, Padding = 8, FilterMode = FilterMode.Bilinear, ShipToConfig = false },
         new Variant { BundleName = "02 zh native", DirName = "zh-native", FontAssetDir = "zh-native",
-                      SamplingPointSize = 16, Padding = 2, FilterMode = FilterMode.Point },
+                      SamplingPointSize = 16, Padding = 2, FilterMode = FilterMode.Point, ShipToConfig = false },
     };
 
     public static void BuildAll()
@@ -87,7 +88,10 @@ public static class BuildUnifontBundles
             {
                 if (!string.IsNullOrEmpty(repoRoot))
                 {
-                    string destDir = Path.Combine(repoRoot, "assets", "FontPatcher", v.DirName);
+                    string destRoot = v.ShipToConfig
+                        ? Path.Combine(repoRoot, "assets", "FontPatcher")
+                        : Path.Combine(repoRoot, "test-bundles");
+                    string destDir = Path.Combine(destRoot, v.DirName);
                     Directory.CreateDirectory(destDir);
                     File.Copy(Path.Combine("Assets/Builds/win64", v.BundleName),
                               Path.Combine(destDir, v.BundleName), overwrite: true);
