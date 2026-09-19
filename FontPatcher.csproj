@@ -18,29 +18,47 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <OutputPath>.\build</OutputPath>
+    <OutputPath>build</OutputPath>
     <DebugType>None</DebugType>
-    <LethalCompanyDir>C:/Program Files (x86)/Steam/steamapps/common/Lethal Company/Lethal Company_Data/Managed</LethalCompanyDir>
-    <ModPath>$(appdata)\r2modmanPlus-local\LethalCompany\profiles\Default\BepInEx\plugins\$(Authors)-$(AssemblyName)\</ModPath>
+    <!-- Game's Managed folder. Override on non-Windows machines:
+         dotnet build -p:LethalCompanyDir="/path/to/Lethal Company/Lethal Company_Data/Managed" -->
+    <LethalCompanyDir Condition="'$(LethalCompanyDir)' == ''">C:/Program Files (x86)/Steam/steamapps/common/Lethal Company/Lethal Company_Data/Managed</LethalCompanyDir>
+    <!-- r2modman test-deploy folder (Windows-only default, kept from upstream). -->
+    <ModPath Condition="'$(ModPath)' == '' and '$(appdata)' != ''">$(appdata)\r2modmanPlus-local\LethalCompany\profiles\Default\BepInEx\plugins\$(Authors)-$(AssemblyName)\</ModPath>
+    <!-- Local test-deploy target, e.g. the BepInEx/plugins folder of a real game install:
+         dotnet build -p:TestDeployPath="/path/to/BepInEx/plugins/" -->
+    <TestDeployPath Condition="'$(TestDeployPath)' == ''">$(ModPath)</TestDeployPath>
+    <!-- Pass -p:EnableTcliBuild=false to skip Thunderstore packaging entirely. -->
+    <EnableTcliBuild Condition="'$(EnableTcliBuild)' == ''">true</EnableTcliBuild>
   </PropertyGroup>
 
-  <Target Name="CopyForTest" AfterTargets="Build" Condition="'$(Configuration)' != 'Release'">
-    <Copy SourceFiles="$(OutputPath)\$(AssemblyName).dll" DestinationFolder="$(ModPath)" Condition="Exists('$(ModPath)')" />
+  <Target Name="CopyForTest" AfterTargets="Build" Condition="'$(Configuration)' != 'Release' and Exists('$(TestDeployPath)')">
+    <Copy SourceFiles="$(OutputPath)/$(AssemblyName).dll" DestinationFolder="$(TestDeployPath)" />
   </Target>
 
-  <Target Name="Bundling" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' or !Exists('$(ModPath)')">
+  <!-- Detect whether the tcli dotnet tool is runnable; a missing tool must not fail the build. -->
+  <Target Name="ProbeTcli" Condition="'$(Configuration)' == 'Release' and '$(EnableTcliBuild)' == 'true'">
+    <Exec Command="tcli --version" ContinueOnError="true" IgnoreExitCode="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_TcliProbeExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <TcliAvailable Condition="'$(_TcliProbeExitCode)' == '0'">true</TcliAvailable>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="Bundling" AfterTargets="Build" DependsOnTargets="ProbeTcli" Condition="'$(Configuration)' == 'Release' and '$(EnableTcliBuild)' == 'true' and '$(TcliAvailable)' == 'true'">
     <ItemGroup>
-      <ModPackPath Include="$(OutputPath)\*.zip" />
+      <ModPackPath Include="$(OutputPath)/*.zip" />
     </ItemGroup>
     <Delete Files="@(ModPackPath)" />
-    <Delete Files="$(OutputPath)\$(AssemblyName).deps.json" />
+    <Delete Files="$(OutputPath)/$(AssemblyName).deps.json" />
     <Exec Command="tcli build --package-version $(BepInExPluginVersion)" />
   </Target>
 
   <ItemGroup>
     <PackageReference Include="BepInEx.Analyzers" Version="1.*" PrivateAssets="all" />
     <PackageReference Include="BepInEx.Core" Version="5.*" />
-    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" />
+    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.*" PrivateAssets="all" />
     <PackageReference Include="UnityEngine.Modules" Version="2022.3.9" IncludeAssets="compile" />
     <Reference Include="Assembly-CSharp">
       <HintPath>$(LethalCompanyDir)/Assembly-CSharp.dll</HintPath>
