@@ -5,6 +5,44 @@
 Change in-game font to other font asset  
 Fix chat input bug on IME input
 
+## Chinese bundle (Unifont, included)
+
+This fork ships a ready-made Chinese font bundle based on
+[GNU Unifont](https://unifoundry.com/unifont/index.html) 18.0.01, so Simplified/Traditional
+Chinese, Japanese kana, CJK punctuation and fullwidth forms render without tofu (□):
+
+- Full coverage of the 通用规范汉字表 (Table of General Standard Chinese Characters,
+  8105 entries incl. 178 extension-B/F characters) — verified programmatically.
+- The bundle is a **dynamic** TMP font asset: glyphs are rasterized on demand from the
+  embedded Unifont font data, so nothing is pre-baked and any Unicode character Unifont
+  covers (planes 0–3, ~59k codepoints) can appear.
+- Unifont's 16px pixel grid matches the game's low-resolution aesthetic. The font asset
+  metrics are normalized to the game font (ascent 0.8em, line height 1.09em) so mixed
+  Chinese/Latin lines share one baseline and line height.
+- Latin characters are still rendered by the game's own font (keep
+  `UsingNormalIngameFont = true`); Unifont only supplies the glyphs the game font lacks.
+
+`config/FontPatcher/default/00 zh` ships in this package and loads automatically.
+Two alternative builds for comparison are in `test-bundles/` — copy one into
+`BepInEx/config/FontPatcher/<name>/` and point `FontAssetsPath` at it:
+
+| Bundle | Sampling | Filter | Character |
+|---|---|---|---|
+| `00 zh` (shipped) | 80 pt (5× grid) | Point | crisp pixels; slight sharpening when downscaled far |
+| `01 zh bilinear` | 80 pt (5× grid) | Bilinear | softer, most readable at small text sizes |
+| `02 zh native` | 16 pt (1:1 grid) | Point | native pixel size; smallest memory footprint (4 MB vs 75 MB if every hanzi is used) |
+
+Atlas pages are 1024×1024 Alpha8 textures created on demand (~1 MB each); a full
+通用规范汉字表 run uses 75 pages at 80 pt but only 4 at 16 pt. Typical chat usage stays
+on the first page.
+
+Note: upstream's `00 default` (English / `$` fix) bundle is not included here — its
+font files are distributed only through the upstream Thunderstore release and their
+redistribution status was not confirmed. Install the upstream
+[LC-FontPatcher release](https://thunderstore.io/c/lethal-company/p/LeKAKiD/FontPatcher/)
+alongside, or build your own `00 default` bundle (see below); Latin text renders via the
+game font regardless while `UsingNormalIngameFont = true`.
+
 ## Config
 
 ![image](https://github.com/lekakid/LC-FontPatcher/assets/1362809/ca6112ab-38f5-4386-aca8-60bd872bf367)
@@ -161,3 +199,57 @@ Build AssetBundles
 ![image](https://github.com/lekakid/LC-FontPatcher/assets/1362809/5e77314d-db60-4370-b2f2-7452f8d78ec6)
 
 Copy AssetBundles file to your mod folder
+
+## Rebuilding the Unifont bundles / building on macOS
+
+The included Unifont bundles are reproducible from `tools/`:
+
+```bash
+# prerequisites: Unity 2022.3.62f2 (game version) or 2022.3.9f1 with the
+# Windows Build Support (Mono) module, dotnet SDK, python3 + fonttools
+tools/build-bundles.sh               # build + validate (sample character set)
+tools/build-bundles.sh --full-hanzi  # also add all 8105 standard hanzi in-editor
+```
+
+`tools/build-bundles.sh` runs two Unity batchmode stages against the project in
+`../unity-project` (created with `-createProject`, TMP 3.0.7 = the game's TMP version):
+
+1. `BuildUnifontBundles.BuildAll` — imports `Assets/Fonts/<variant>/unifont-18.0.01.otf`
+   (font data embedded), creates `Normal`/`Transmit` font assets via
+   `TMP_FontAsset.CreateFontAsset(font, 80|16, padding, GlyphRenderMode.RASTER, 1024, 1024,
+   AtlasPopulationMode.Dynamic, enableMultiAtlasSupport: true)`, normalizes the face
+   metrics to the game font ratios, and builds StandaloneWindows64 (ship) +
+   StandaloneOSX (validation) AssetBundles.
+2. `ValidateUnifontBundles.Run` — loads the macOS bundles through
+   `AssetBundle.LoadFromFile`, then exercises on-demand glyph generation from the
+   embedded font (TMP in-game behaves like the player build; validation runs on
+   in-memory copies because TMP 3.0.7's editor-only `SetupNewAtlasTexture` branch
+   NREs on bundle-persistent assets).
+
+Coverage of the 通用规范汉字表 is also checked offline against the font's cmap:
+
+```bash
+python3 tools/check_coverage.py ../fonts/unifont-18.0.01.otf ../data/tongyong-guifan-hanzibiao.txt
+```
+
+### Building the plugin on macOS
+
+```bash
+dotnet build -c Debug \
+  -p:LethalCompanyDir="/path/to/Lethal Company/Lethal Company_Data/Managed" \
+  -p:TestDeployPath="/path/to/Lethal Company/BepInEx/plugins/"
+dotnet build -c Release \
+  -p:LethalCompanyDir="..."   # also produces the Thunderstore zip
+```
+
+`tcli` is used for packaging when available and working; otherwise
+`tools/package-thunderstore.py` assembles the same zip (manifest.json, icon, README,
+plugins/, config/, licenses/) from `thunderstore.toml`. Disable packaging entirely
+with `-p:EnableTcliBuild=false`.
+
+### Licenses
+
+- This mod keeps its original MIT license (`LICENSE`).
+- The font bundles embed GNU Unifont 18.0.01, dual-licensed
+  GPLv2+ with the GNU Font Embedding Exception and SIL OFL 1.1
+  (`licenses/Unifont-*.txt`, shipped in the Thunderstore package).
