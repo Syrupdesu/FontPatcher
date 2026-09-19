@@ -25,6 +25,11 @@ class FontLoader
 
     public static void Load()
     {
+        // Initialize regexes before anything that can throw: Harmony patches run even when
+        // font loading failed, and must never see a null regex (NRE for every patched font).
+        normalRegex = new Regex(Plugin.configNormalRegexPattern.Value);
+        transmitRegex = new Regex(Plugin.configTransmitRegexPattern.Value);
+
         try
         {
             string configPath = Path.GetDirectoryName(Plugin.Instance.Config.ConfigFilePath);
@@ -32,12 +37,26 @@ class FontLoader
             Plugin.LogInfo($"Font path: {fontsPath}");
 
             DirectoryInfo di = new DirectoryInfo(fontsPath);
+            if (!di.Exists)
+            {
+                Plugin.LogError($"Font directory not found: {fontsPath}");
+                return;
+            }
             FileInfo[] fileInfos = di.GetFiles("*");
+            Array.Sort(fileInfos, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
             int sucessCount = 0;
             int failCount = 0;
             foreach (FileInfo info in fileInfos)
             {
+                // Unity writes a "<bundle>.manifest" (and a summary manifest) next to built
+                // AssetBundles; they are not bundles and only produce noise if loaded.
+                if (info.Extension.Equals(".manifest", StringComparison.OrdinalIgnoreCase) ||
+                    info.Extension.Equals(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 try
                 {
                     AssetBundle bundle = AssetBundle.LoadFromFile(info.FullName);
@@ -76,9 +95,6 @@ class FontLoader
                     failCount += 1;
                 }
             }
-
-            normalRegex = new Regex(Plugin.configNormalRegexPattern.Value);
-            transmitRegex = new Regex(Plugin.configTransmitRegexPattern.Value);
 
             StringBuilder stringBuilder = new();
             stringBuilder.Append($"{sucessCount} fonts loaded");
