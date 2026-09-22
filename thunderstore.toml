@@ -2,10 +2,10 @@
 schemaVersion = "0.0.1"
 
 [package]
-namespace = "LeKAKiD"
-name = "FontPatcher"
-description = "Replace in-game font with other things"
-websiteUrl = "https://github.com/lekakid/LC-FontPatcher"
+namespace = "Syrupdesu"
+name = "LCChineseFont"
+description = "添加完整中文字体支持，并修复中文 IME 输入。"
+websiteUrl = "https://github.com/Syrupdesu/LC-ChineseFont"
 containsNsfwContent = false
 [package.dependencies]
 BepInEx-BepInExPack = "5.4.2100"

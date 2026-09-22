@@ -2,10 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
-    <AssemblyName>FontPatcher</AssemblyName>
+    <AssemblyName>LCChineseFont</AssemblyName>
     <Description>Replace in-game font with other things</Description>
-    <Version>1.2.4</Version>
-    <Authors>LeKAKiD</Authors>
+    <Version>1.2.5</Version>
+    <Authors>Syrupdesu</Authors>
     <RootNamespace>FontPatcher</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RestoreAdditionalProjectSources>

@@ -7,7 +7,7 @@ namespace FontPatcher;
 
 class PluginInfo
 {
-    public const string GUID = "lekakid.lcfontpatcher";
+    public const string GUID = "syrupdesu.lcchinesefont";
     public const string Name = MyPluginInfo.PLUGIN_NAME;
     public const string Version = MyPluginInfo.PLUGIN_VERSION;
 }
