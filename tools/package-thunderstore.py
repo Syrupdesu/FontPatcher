@@ -48,7 +48,10 @@ def main() -> int:
         "version_number": version,
         "website_url": package["websiteUrl"],
         "description": package["description"],
-        "dependencies": dict(package.get("dependencies", {})),
+        "dependencies": [
+            f"{dep_name}-{dep_version}"
+            for dep_name, dep_version in package.get("dependencies", {}).items()
+        ],
     }
 
     out.parent.mkdir(parents=True, exist_ok=True)
